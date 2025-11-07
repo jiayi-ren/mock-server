@@ -1,0 +1,23 @@
+{
+  "name": "mock-server",
+  "version": "1.0.0",
+  "description": "Express mock server",
+  "main": "app.js",
+  "repository": "https://github.com/jiayi-ren/mock-server",
+  "author": "Jiayi Ren",
+  "license": "MIT",
+  "private": false,
+  "publishConfig": {
+    "registry": "https://registry.npmjs.org/"
+  },
+  "engines": {
+    "node": ">=22.0.0"
+  },
+  "scripts": {
+    "start": "node app.js"
+  },
+  "dependencies": {
+    "express": "^5.0.0",
+    "cors": "^2.8.5"
+  }
+}
