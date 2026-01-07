@@ -8,16 +8,68 @@ const { streamNDJSON, streamSSE } = require("./utils/json_streaming_ndjson");
 const app = express();
 const port = process.env.PORT || 3001;
 
+// Track active requests to prevent memory exhaustion
+let activeRequests = 0;
+
+// Dynamic limits based on request size
+function getMaxConcurrentForSize(sizeKB) {
+  if (sizeKB < 10240) return 10;      // <10MB: allow 10 concurrent
+  if (sizeKB < 30720) return 5;       // 10-30MB: allow 5 concurrent
+  if (sizeKB < 51200) return 3;       // 30-50MB: allow 3 concurrent
+  if (sizeKB < 102400) return 2;      // 50-100MB: allow 2 concurrent
+  return 5;                            // >100MB with streaming: allow 5
+}
+
 // Enable CORS for all routes
 app.use(cors());
 
 // Serve static files from public directory
 app.use('/demo', express.static('public'));
 
-// Health check endpoint
+// Middleware to limit concurrent requests (basic check)
+app.use((req, res, next) => {
+  // Get request size if available
+  const sizeKB = parseFloat(req.query.size) || 10;
+  const maxForSize = getMaxConcurrentForSize(sizeKB);
+  
+  if (activeRequests >= maxForSize) {
+    return res.status(503).json({
+      error: 'Server busy',
+      message: `Too many concurrent requests for this size. Max: ${maxForSize}. Please try again in a moment.`,
+      activeRequests,
+      maxAllowed: maxForSize,
+      requestSizeKB: sizeKB
+    });
+  }
+  
+  activeRequests++;
+  res.on('finish', () => {
+    activeRequests--;
+  });
+  res.on('close', () => {
+    activeRequests--;
+  });
+  
+  next();
+});
+
+// Health check endpoint with memory stats
 app.get("/health", (req, res) => {
+  const memUsage = process.memoryUsage();
+  const heapUsedMB = Math.round(memUsage.heapUsed / 1024 / 1024);
+  const heapTotalMB = Math.round(memUsage.heapTotal / 1024 / 1024);
+  const rssMB = Math.round(memUsage.rss / 1024 / 1024);
+  
   res.status(200).json({
-    status: "ok"
+    status: "ok",
+    memory: {
+      heapUsedMB,
+      heapTotalMB,
+      heapUsagePercent: Math.round((heapUsedMB / heapTotalMB) * 100),
+      rssMB
+    },
+    activeRequests,
+    uptime: Math.round(process.uptime())
   });
 });
 
@@ -286,6 +338,21 @@ app.get("/json", (req, res) => {
     const sizeKB = parseFloat(req.query['size']) || 10;
     const useRandom = req.query['random'] === 'true' || req.query['random'] === '1';
     const STREAMING_THRESHOLD_KB = 102400; // 100 MB
+    
+    // Check memory before processing large requests
+    const memUsage = process.memoryUsage();
+    const heapUsedMB = memUsage.heapUsed / 1024 / 1024;
+    const heapTotalMB = memUsage.heapTotal / 1024 / 1024;
+    
+    // If heap is >80% full and request is >10MB, reject
+    if (heapUsedMB / heapTotalMB > 0.8 && sizeKB > 10240) {
+      return res.status(503).json({
+        error: 'Server memory low',
+        message: 'Server is under memory pressure. Please try a smaller size or wait a moment.',
+        heapUsedMB: Math.round(heapUsedMB),
+        heapTotalMB: Math.round(heapTotalMB)
+      });
+    }
 
     // Validate structure
     if (![1, 2, 3, 4, 5, 6, 7, 8, 9].includes(structure)) {
@@ -350,14 +417,28 @@ app.get("/stream/ndjson", (req, res) => {
         error: `Invalid size parameter. Must be between 1 and ${MAX_SIZE_KB} (1 GB).`
       });
     }
+    
+    // Memory check
+    const memUsage = process.memoryUsage();
+    const heapUsedMB = memUsage.heapUsed / 1024 / 1024;
+    const heapTotalMB = memUsage.heapTotal / 1024 / 1024;
+    
+    if (heapUsedMB / heapTotalMB > 0.8) {
+      return res.status(503).json({
+        error: 'Server memory low',
+        message: 'Server is under memory pressure. Please try again in a moment.'
+      });
+    }
 
     res.set('X-Deterministic', useRandom ? 'false' : 'true');
     streamNDJSON(res, recordFormat, sizeKB, useRandom);
   } catch (error) {
-    res.status(500).json({
-      error: 'Failed to stream NDJSON',
-      message: error.message
-    });
+    if (!res.headersSent) {
+      res.status(500).json({
+        error: 'Failed to stream NDJSON',
+        message: error.message
+      });
+    }
   }
 });
 
@@ -373,14 +454,28 @@ app.get("/stream/sse", (req, res) => {
         error: `Invalid size parameter. Must be between 1 and ${MAX_SIZE_KB} (1 GB).`
       });
     }
+    
+    // Memory check
+    const memUsage = process.memoryUsage();
+    const heapUsedMB = memUsage.heapUsed / 1024 / 1024;
+    const heapTotalMB = memUsage.heapTotal / 1024 / 1024;
+    
+    if (heapUsedMB / heapTotalMB > 0.8) {
+      return res.status(503).json({
+        error: 'Server memory low',
+        message: 'Server is under memory pressure. Please try again in a moment.'
+      });
+    }
 
     res.set('X-Deterministic', useRandom ? 'false' : 'true');
     streamSSE(res, recordFormat, sizeKB, useRandom);
   } catch (error) {
-    res.status(500).json({
-      error: 'Failed to stream SSE',
-      message: error.message
-    });
+    if (!res.headersSent) {
+      res.status(500).json({
+        error: 'Failed to stream SSE',
+        message: error.message
+      });
+    }
   }
 });
 

@@ -27,7 +27,7 @@ function supportsStreaming(structure) {
  * @param {boolean} useRandom - Use random values
  * @param {number} chunkSizeKB - Size of each chunk in KB (default 10MB)
  */
-function streamJSON(res, structure, recordFormat, sizeKB, useRandom, chunkSizeKB = 10240) {
+function streamJSON(res, structure, recordFormat, sizeKB, useRandom, chunkSizeKB = 5120) {
   // Check if structure supports streaming
   if (!supportsStreaming(structure)) {
     throw new Error(`Structure ${structure} does not support streaming. Use non-streaming endpoint for this structure.`);

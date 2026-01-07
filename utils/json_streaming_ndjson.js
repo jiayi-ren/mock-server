@@ -16,7 +16,7 @@ const { generateJSON } = require('./json_generator');
  * @param {boolean} useRandom - Use random values
  * @param {number} chunkSizeKB - Size of each chunk in KB (default 10MB)
  */
-function streamNDJSON(res, recordFormat, sizeKB, useRandom, chunkSizeKB = 10240) {
+function streamNDJSON(res, recordFormat, sizeKB, useRandom, chunkSizeKB = 5120) {
   // Set headers for NDJSON streaming
   res.setHeader('Content-Type', 'application/x-ndjson');
   res.setHeader('Transfer-Encoding', 'chunked');
@@ -24,43 +24,55 @@ function streamNDJSON(res, recordFormat, sizeKB, useRandom, chunkSizeKB = 10240)
   
   let totalGenerated = 0;
   let recordCount = 0;
+  let isStreaming = true;
 
-  // Generate and stream in chunks
-  const streamInterval = setInterval(() => {
-    if (totalGenerated >= sizeKB) {
-      clearInterval(streamInterval);
-      res.end();
-      return;
-    }
+  // Handle client disconnect
+  res.on('close', () => {
+    isStreaming = false;
+  });
 
-    const remainingKB = sizeKB - totalGenerated;
-    const currentChunkSize = Math.min(chunkSizeKB, remainingKB);
-    
-    if (currentChunkSize < 1) {
-      clearInterval(streamInterval);
-      res.end();
-      return;
-    }
-
-    try {
-      // Generate chunk of records
-      const records = generateJSON(recordFormat, currentChunkSize, useRandom);
+  // Generate and stream in chunks asynchronously
+  async function streamChunks() {
+    while (isStreaming && totalGenerated < sizeKB) {
+      const remainingKB = sizeKB - totalGenerated;
+      const currentChunkSize = Math.min(chunkSizeKB, remainingKB);
       
-      // Stream each record as a separate line (NDJSON format)
-      for (let i = 0; i < records.length; i++) {
-        res.write(JSON.stringify(records[i]) + '\n');
-        recordCount++;
+      if (currentChunkSize < 1) break;
+
+      try {
+        // Generate chunk of records
+        const records = generateJSON(recordFormat, currentChunkSize, useRandom);
+        
+        // Stream each record as a separate line (NDJSON format)
+        for (let i = 0; i < records.length; i++) {
+          if (!isStreaming) break;
+          res.write(JSON.stringify(records[i]) + '\n');
+          recordCount++;
+        }
+        
+        // Estimate size
+        totalGenerated += currentChunkSize;
+        
+        // Small delay to make streaming visible and allow garbage collection
+        await new Promise(resolve => setTimeout(resolve, 50));
+        
+      } catch (error) {
+        console.error('Streaming error:', error);
+        break;
       }
-      
-      // Estimate size
-      totalGenerated += currentChunkSize;
-      
-    } catch (error) {
-      clearInterval(streamInterval);
-      res.end();
-      throw error;
     }
-  }, 100); // Send a chunk every 100ms for visible streaming
+    
+    if (isStreaming) {
+      res.end();
+    }
+  }
+
+  streamChunks().catch(err => {
+    console.error('Stream error:', err);
+    if (!res.headersSent) {
+      res.status(500).end();
+    }
+  });
 }
 
 /**
@@ -73,7 +85,7 @@ function streamNDJSON(res, recordFormat, sizeKB, useRandom, chunkSizeKB = 10240)
  * @param {boolean} useRandom - Use random values
  * @param {number} chunkSizeKB - Size of each chunk in KB
  */
-function streamSSE(res, recordFormat, sizeKB, useRandom, chunkSizeKB = 10240) {
+function streamSSE(res, recordFormat, sizeKB, useRandom, chunkSizeKB = 5120) {
   // Set headers for SSE
   res.setHeader('Content-Type', 'text/event-stream');
   res.setHeader('Cache-Control', 'no-cache');
@@ -82,44 +94,56 @@ function streamSSE(res, recordFormat, sizeKB, useRandom, chunkSizeKB = 10240) {
   
   let totalGenerated = 0;
   let recordCount = 0;
+  let isStreaming = true;
 
-  // Generate and stream in chunks
-  const streamInterval = setInterval(() => {
-    if (totalGenerated >= sizeKB) {
-      clearInterval(streamInterval);
+  // Handle client disconnect
+  res.on('close', () => {
+    isStreaming = false;
+  });
+
+  // Generate and stream in chunks asynchronously
+  async function streamChunks() {
+    while (isStreaming && totalGenerated < sizeKB) {
+      const remainingKB = sizeKB - totalGenerated;
+      const currentChunkSize = Math.min(chunkSizeKB, remainingKB);
+      
+      if (currentChunkSize < 1) break;
+
+      try {
+        // Generate chunk of records
+        const records = generateJSON(recordFormat, currentChunkSize, useRandom);
+        
+        // Stream each record as SSE event
+        for (let i = 0; i < records.length; i++) {
+          if (!isStreaming) break;
+          res.write(`data: ${JSON.stringify(records[i])}\n\n`);
+          recordCount++;
+        }
+        
+        // Estimate size
+        totalGenerated += currentChunkSize;
+        
+        // Small delay to make streaming visible and allow garbage collection
+        await new Promise(resolve => setTimeout(resolve, 50));
+        
+      } catch (error) {
+        console.error('Streaming error:', error);
+        break;
+      }
+    }
+    
+    if (isStreaming) {
       res.write('event: done\ndata: {"status": "complete"}\n\n');
       res.end();
-      return;
     }
+  }
 
-    const remainingKB = sizeKB - totalGenerated;
-    const currentChunkSize = Math.min(chunkSizeKB, remainingKB);
-    
-    if (currentChunkSize < 1) {
-      clearInterval(streamInterval);
-      res.end();
-      return;
+  streamChunks().catch(err => {
+    console.error('Stream error:', err);
+    if (!res.headersSent) {
+      res.status(500).end();
     }
-
-    try {
-      // Generate chunk of records
-      const records = generateJSON(recordFormat, currentChunkSize, useRandom);
-      
-      // Stream each record as SSE event
-      for (let i = 0; i < records.length; i++) {
-        res.write(`data: ${JSON.stringify(records[i])}\n\n`);
-        recordCount++;
-      }
-      
-      // Estimate size
-      totalGenerated += currentChunkSize;
-      
-    } catch (error) {
-      clearInterval(streamInterval);
-      res.end();
-      throw error;
-    }
-  }, 100); // Send a chunk every 100ms for visible streaming
+  });
 }
 
 module.exports = {
