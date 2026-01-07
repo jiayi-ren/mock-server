@@ -344,20 +344,8 @@ app.get("/json", (req, res) => {
     const useRandom = req.query['random'] === 'true' || req.query['random'] === '1';
     const STREAMING_THRESHOLD_KB = 102400; // 100 MB
     
-    // Check memory before processing large requests
-    const memUsage = process.memoryUsage();
-    const heapUsedMB = memUsage.heapUsed / 1024 / 1024;
-    const heapTotalMB = memUsage.heapTotal / 1024 / 1024;
-    
-    // If heap is >80% full and request is >10MB, reject
-    if (heapUsedMB / heapTotalMB > 0.8 && sizeKB > 10240) {
-      return res.status(503).json({
-        error: 'Server memory low',
-        message: 'Server is under memory pressure. Please try a smaller size or wait a moment.',
-        heapUsedMB: Math.round(heapUsedMB),
-        heapTotalMB: Math.round(heapTotalMB)
-      });
-    }
+    // Memory check disabled - hosting platform manages memory dynamically
+    // (heap grows as needed, so static checks don't work)
 
     // Validate structure
     if (![1, 2, 3, 4, 5, 6, 7, 8, 9].includes(structure)) {
@@ -423,17 +411,7 @@ app.get("/stream/ndjson", (req, res) => {
       });
     }
     
-    // Memory check
-    const memUsage = process.memoryUsage();
-    const heapUsedMB = memUsage.heapUsed / 1024 / 1024;
-    const heapTotalMB = memUsage.heapTotal / 1024 / 1024;
-    
-    if (heapUsedMB / heapTotalMB > 0.8) {
-      return res.status(503).json({
-        error: 'Server memory low',
-        message: 'Server is under memory pressure. Please try again in a moment.'
-      });
-    }
+    // Memory check disabled - hosting platform manages memory dynamically
 
     res.set('X-Deterministic', useRandom ? 'false' : 'true');
     streamNDJSON(res, recordFormat, sizeKB, useRandom);
@@ -460,17 +438,7 @@ app.get("/stream/sse", (req, res) => {
       });
     }
     
-    // Memory check
-    const memUsage = process.memoryUsage();
-    const heapUsedMB = memUsage.heapUsed / 1024 / 1024;
-    const heapTotalMB = memUsage.heapTotal / 1024 / 1024;
-    
-    if (heapUsedMB / heapTotalMB > 0.8) {
-      return res.status(503).json({
-        error: 'Server memory low',
-        message: 'Server is under memory pressure. Please try again in a moment.'
-      });
-    }
+    // Memory check disabled - hosting platform manages memory dynamically
 
     res.set('X-Deterministic', useRandom ? 'false' : 'true');
     streamSSE(res, recordFormat, sizeKB, useRandom);
