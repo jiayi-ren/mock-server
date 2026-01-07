@@ -102,7 +102,7 @@ for (let i = 0; i < 1000; i++) {
 }
 Object.freeze(DECIMAL_RATES);
 
-const MAX_SIZE_KB = 1024 * 64; // 64 MB
+const MAX_SIZE_KB = 1024 * 1024; // 1 GB
 
 /**
  * Generate a single record with all field types
@@ -240,9 +240,9 @@ function generateJSON(format = 1, sizeKB = 10, useRandom = false) {
     throw new Error('Invalid format. Must be 1, 2, or 3');
   }
 
-  // Validate size (max 64MB)
+  // Validate size (max 1GB)
   if (sizeKB <= 0 || sizeKB > MAX_SIZE_KB) {
-    throw new Error('Invalid size. Must be between 1 KB and 64 MB');
+    throw new Error('Invalid size. Must be between 1 KB and 1 GB');
   }
 
   // All formats now return the same field structure

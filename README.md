@@ -8,7 +8,7 @@ A flexible Express-based mock server that generates JSON test data with configur
 - **Dynamic JSON Generation**: Generate JSON payloads on-demand
 - **9 Different JSON Structures**: From flat arrays to deep nested objects, array of arrays, and columnar format
 - **Consistent Field Types**: All records include integers, decimals, booleans, strings with special characters, nested objects, and arrays
-- **Flexible Sizing**: Generate payloads from 1 KB up to 64 MB
+- **Flexible Sizing**: Generate payloads from 1 KB up to 1 GB
 - **CSV-Friendly**: All structures include JSONPath expressions for easy CSV conversion
 
 ## Installation
@@ -41,7 +41,7 @@ Generates and returns JSON data based on query parameters.
 |-----------|------|---------|-------------|
 | `structure` | 1-9 | 1 | JSON structure format - how tabular data is represented |
 | `record-format` | 1-3 | 1 | (Kept for compatibility - currently all return same fields) |
-| `size` | number | 10 | Target size in KB (1 - 65536 KB / 64 MB) |
+| `size` | number | 10 | Target size in KB (1 - 1048576 KB / 1 GB) |
 | `random` | boolean | false | If true, use random values; if false (default), use deterministic values |
 
 **Important:** By default, responses are **deterministic** - the same query parameters will always return identical data. This is useful for:

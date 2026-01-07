@@ -67,7 +67,7 @@ app.get("/", (req, res) => {
             <td><code>size</code></td>
             <td>number</td>
             <td>10</td>
-            <td>Target size in KB (1 - ${MAX_SIZE_KB} / 64 MB)</td>
+            <td>Target size in KB (1 - ${MAX_SIZE_KB} / 1 GB)</td>
           </tr>
           <tr>
             <td><code>random</code></td>
@@ -283,10 +283,10 @@ app.get("/json", (req, res) => {
       });
     }
 
-    // Validate size (max 64MB)
+    // Validate size (max 1GB)
     if (sizeKB <= 0 || sizeKB > MAX_SIZE_KB) {
       return res.status(400).json({
-        error: `Invalid size parameter. Must be between 1 and ${MAX_SIZE_KB} (64 MB).`
+        error: `Invalid size parameter. Must be between 1 and ${MAX_SIZE_KB} (1 GB).`
       });
     }
 
