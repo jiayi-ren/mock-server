@@ -43,12 +43,17 @@ app.use((req, res, next) => {
   }
   
   activeRequests++;
-  res.on('finish', () => {
-    activeRequests--;
-  });
-  res.on('close', () => {
-    activeRequests--;
-  });
+  let decremented = false;
+  
+  const decrementCounter = () => {
+    if (!decremented) {
+      activeRequests--;
+      decremented = true;
+    }
+  };
+  
+  res.on('finish', decrementCounter);
+  res.on('close', decrementCounter);
   
   next();
 });
