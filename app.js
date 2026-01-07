@@ -3,12 +3,16 @@ const cors = require("cors");
 const { generateJSON, MAX_SIZE_KB } = require("./utils/json_generator");
 const { applyStructure, getJSONPath, getStructureDescription } = require("./utils/json_structure");
 const { streamJSON, supportsStreaming } = require("./utils/json_streaming");
+const { streamNDJSON, streamSSE } = require("./utils/json_streaming_ndjson");
 
 const app = express();
 const port = process.env.PORT || 3001;
 
 // Enable CORS for all routes
 app.use(cors());
+
+// Serve static files from public directory
+app.use('/demo', express.static('public'));
 
 // Health check endpoint
 app.get("/health", (req, res) => {
@@ -250,6 +254,19 @@ app.get("/", (req, res) => {
           <a href="/json?structure=8&size=50">/json?structure=8&size=50</a>
         </div>
 
+        <h3>Progressive Streaming Endpoints</h3>
+        <p>For <strong>true progressive streaming</strong> visible in the browser (data appears as it's generated):</p>
+        <ul>
+          <li><a href="/stream/ndjson?size=50000">GET /stream/ndjson</a> - NDJSON format (newline-delimited JSON, one record per line)</li>
+          <li><a href="/stream/sse?size=50000">GET /stream/sse</a> - Server-Sent Events format</li>
+        </ul>
+        <p><strong>Parameters:</strong> <code>size</code> (KB), <code>record-format</code> (1-3), <code>random</code> (true/false)</p>
+        <p><em>Note: The <code>/json</code> endpoint uses HTTP chunked transfer but browsers buffer the complete JSON before displaying. Use these endpoints to see data streaming progressively in real-time.</em></p>
+        
+        <div style="margin: 20px 0; padding: 15px; background: #e8f4f8; border-radius: 5px;">
+          <strong>🎬 <a href="/demo/stream-demo.html">View Live Streaming Demo</a></strong> - Interactive page showing progressive streaming in action!
+        </div>
+
         <h3>Other Endpoints</h3>
         <ul>
           <li><a href="/health">GET /health</a> - Health check</li>
@@ -316,6 +333,52 @@ app.get("/json", (req, res) => {
   } catch (error) {
     res.status(500).json({
       error: 'Failed to generate JSON',
+      message: error.message
+    });
+  }
+});
+
+// NDJSON streaming endpoint (visible progressive streaming in browser)
+app.get("/stream/ndjson", (req, res) => {
+  try {
+    const recordFormat = parseInt(req.query['record-format']) || 1;
+    const sizeKB = parseFloat(req.query['size']) || 100;
+    const useRandom = req.query['random'] === 'true' || req.query['random'] === '1';
+
+    if (sizeKB <= 0 || sizeKB > MAX_SIZE_KB) {
+      return res.status(400).json({
+        error: `Invalid size parameter. Must be between 1 and ${MAX_SIZE_KB} (1 GB).`
+      });
+    }
+
+    res.set('X-Deterministic', useRandom ? 'false' : 'true');
+    streamNDJSON(res, recordFormat, sizeKB, useRandom);
+  } catch (error) {
+    res.status(500).json({
+      error: 'Failed to stream NDJSON',
+      message: error.message
+    });
+  }
+});
+
+// Server-Sent Events streaming endpoint (visible progressive streaming in browser)
+app.get("/stream/sse", (req, res) => {
+  try {
+    const recordFormat = parseInt(req.query['record-format']) || 1;
+    const sizeKB = parseFloat(req.query['size']) || 100;
+    const useRandom = req.query['random'] === 'true' || req.query['random'] === '1';
+
+    if (sizeKB <= 0 || sizeKB > MAX_SIZE_KB) {
+      return res.status(400).json({
+        error: `Invalid size parameter. Must be between 1 and ${MAX_SIZE_KB} (1 GB).`
+      });
+    }
+
+    res.set('X-Deterministic', useRandom ? 'false' : 'true');
+    streamSSE(res, recordFormat, sizeKB, useRandom);
+  } catch (error) {
+    res.status(500).json({
+      error: 'Failed to stream SSE',
       message: error.message
     });
   }

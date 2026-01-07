@@ -1,0 +1,373 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Progressive Streaming Demo</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 1200px;
+            margin: 40px auto;
+            padding: 0 20px;
+        }
+        h1 { color: #333; }
+        .controls {
+            margin: 20px 0;
+            padding: 20px;
+            background: #f5f5f5;
+            border-radius: 5px;
+        }
+        .controls label {
+            margin-right: 10px;
+        }
+        .controls input, .controls select {
+            margin-right: 20px;
+            padding: 5px;
+        }
+        button {
+            padding: 10px 20px;
+            background: #0066cc;
+            color: white;
+            border: none;
+            border-radius: 3px;
+            cursor: pointer;
+            margin-right: 10px;
+        }
+        button:hover {
+            background: #0052a3;
+        }
+        button:disabled {
+            background: #ccc;
+            cursor: not-allowed;
+        }
+        .stats {
+            margin: 20px 0;
+            padding: 15px;
+            background: #e8f4f8;
+            border-radius: 5px;
+            font-family: monospace;
+        }
+        .records {
+            margin: 20px 0;
+            max-height: 600px;
+            overflow-y: auto;
+            border: 1px solid #ddd;
+            border-radius: 5px;
+            background: #fafafa;
+        }
+        .record {
+            padding: 10px;
+            border-bottom: 1px solid #eee;
+            font-family: monospace;
+            font-size: 12px;
+        }
+        .record:nth-child(even) {
+            background: #f5f5f5;
+        }
+        .record.new {
+            animation: fadeIn 0.3s;
+        }
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(-10px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+        .sample-note {
+            padding: 10px;
+            background: #fff3cd;
+            border: 1px solid #ffc107;
+            border-radius: 3px;
+            margin: 10px 0;
+            font-size: 14px;
+        }
+        .error {
+            color: red;
+            padding: 10px;
+            background: #ffe6e6;
+            border-radius: 3px;
+            margin: 10px 0;
+        }
+        .success {
+            color: green;
+            font-weight: bold;
+        }
+    </style>
+</head>
+<body>
+    <h1>Progressive Streaming Demo</h1>
+    <p>Watch data stream in real-time as it's generated on the server!</p>
+
+    <div class="controls">
+        <label>Format:</label>
+        <select id="format">
+            <option value="ndjson">NDJSON (Newline Delimited JSON)</option>
+            <option value="sse">SSE (Server-Sent Events)</option>
+        </select>
+
+        <label>Size (KB):</label>
+        <input type="number" id="size" value="10000" min="1" max="1048576">
+
+        <label>Random:</label>
+        <input type="checkbox" id="random">
+        
+        <label>Max Display:</label>
+        <input type="number" id="maxDisplay" value="100" min="10" max="10000" title="Maximum records to display (for performance)">
+
+        <button id="startBtn" onclick="startStream()">Start Stream</button>
+        <button id="stopBtn" onclick="stopStream()" disabled>Stop Stream</button>
+        <button onclick="clearRecords()">Clear</button>
+    </div>
+
+    <div class="stats">
+        <div><strong>Status:</strong> <span id="status">Ready</span></div>
+        <div><strong>Records Received:</strong> <span id="count">0</span></div>
+        <div><strong>Data Size:</strong> <span id="dataSize">0 KB</span></div>
+        <div><strong>Duration:</strong> <span id="duration">0s</span></div>
+        <div><strong>Rate:</strong> <span id="rate">0 records/sec</span></div>
+    </div>
+
+    <div id="error"></div>
+
+    <div class="sample-note">
+        <strong>Note:</strong> For performance, only the latest <span id="maxDisplayValue">100</span> records are displayed. 
+        All records are still counted in the statistics above.
+    </div>
+
+    <div class="records" id="records">
+        <div style="padding: 20px; text-align: center; color: #999;">
+            No records yet. Click "Start Stream" to begin.
+        </div>
+    </div>
+
+    <script>
+        let controller = null;
+        let recordCount = 0;
+        let startTime = null;
+        let totalBytes = 0;
+        let durationInterval = null;
+        let maxDisplay = 100;
+        let displayedRecords = [];
+        let updateBatchInterval = null;
+        let pendingRecords = [];
+
+        async function startStream() {
+            const format = document.getElementById('format').value;
+            const size = document.getElementById('size').value;
+            const random = document.getElementById('random').checked;
+            maxDisplay = parseInt(document.getElementById('maxDisplay').value) || 100;
+            document.getElementById('maxDisplayValue').textContent = maxDisplay;
+            
+            // Reset
+            recordCount = 0;
+            totalBytes = 0;
+            startTime = Date.now();
+            displayedRecords = [];
+            pendingRecords = [];
+            document.getElementById('records').innerHTML = '';
+            document.getElementById('error').innerHTML = '';
+            document.getElementById('count').textContent = '0';
+            document.getElementById('dataSize').textContent = '0 KB';
+            document.getElementById('duration').textContent = '0s';
+            document.getElementById('rate').textContent = '0 records/sec';
+            
+            // Update UI
+            document.getElementById('startBtn').disabled = true;
+            document.getElementById('stopBtn').disabled = false;
+            document.getElementById('status').textContent = 'Streaming...';
+            document.getElementById('status').className = 'success';
+
+            // Start duration counter and batch display updates
+            durationInterval = setInterval(updateDuration, 100);
+            updateBatchInterval = setInterval(processPendingRecords, 50);
+
+            const url = `/stream/${format}?size=${size}&random=${random}`;
+            
+            try {
+                controller = new AbortController();
+                const response = await fetch(url, { signal: controller.signal });
+                
+                if (!response.ok) {
+                    throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+                }
+
+                if (format === 'ndjson') {
+                    await streamNDJSON(response);
+                } else {
+                    await streamSSE(response);
+                }
+                
+                document.getElementById('status').textContent = 'Complete!';
+            } catch (error) {
+                if (error.name === 'AbortError') {
+                    document.getElementById('status').textContent = 'Stopped by user';
+                } else {
+                    document.getElementById('status').textContent = 'Error';
+                    document.getElementById('error').innerHTML = 
+                        `<div class="error">Error: ${error.message}</div>`;
+                }
+            } finally {
+                document.getElementById('startBtn').disabled = false;
+                document.getElementById('stopBtn').disabled = true;
+                clearInterval(durationInterval);
+                clearInterval(updateBatchInterval);
+                processPendingRecords(); // Process any remaining records
+                controller = null;
+            }
+        }
+
+        function processPendingRecords() {
+            if (pendingRecords.length === 0) return;
+            
+            const recordsDiv = document.getElementById('records');
+            const fragment = document.createDocumentFragment();
+            
+            // Process up to 50 records at a time
+            const batch = pendingRecords.splice(0, 50);
+            
+            for (const record of batch) {
+                displayedRecords.push(record);
+                
+                // Keep only the last maxDisplay records
+                if (displayedRecords.length > maxDisplay) {
+                    displayedRecords.shift();
+                }
+            }
+            
+            // Re-render only displayed records
+            recordsDiv.innerHTML = '';
+            for (let i = 0; i < displayedRecords.length; i++) {
+                const recordDiv = document.createElement('div');
+                recordDiv.className = 'record';
+                if (i >= displayedRecords.length - batch.length) {
+                    recordDiv.className += ' new';
+                }
+                recordDiv.textContent = JSON.stringify(displayedRecords[i]);
+                fragment.appendChild(recordDiv);
+            }
+            
+            recordsDiv.appendChild(fragment);
+            recordsDiv.scrollTop = recordsDiv.scrollHeight;
+        }
+
+        async function streamNDJSON(response) {
+            const reader = response.body.getReader();
+            const decoder = new TextDecoder();
+            let buffer = '';
+
+            while (true) {
+                const { done, value } = await reader.read();
+                
+                if (done) break;
+                
+                totalBytes += value.length;
+                buffer += decoder.decode(value, { stream: true });
+                
+                // Process complete lines
+                const lines = buffer.split('\n');
+                buffer = lines.pop(); // Keep incomplete line in buffer
+                
+                for (const line of lines) {
+                    if (line.trim()) {
+                        try {
+                            const record = JSON.parse(line);
+                            displayRecord(record);
+                        } catch (e) {
+                            console.error('Failed to parse line:', line, e);
+                        }
+                    }
+                }
+            }
+        }
+
+        async function streamSSE(response) {
+            const reader = response.body.getReader();
+            const decoder = new TextDecoder();
+            let buffer = '';
+
+            while (true) {
+                const { done, value } = await reader.read();
+                
+                if (done) break;
+                
+                totalBytes += value.length;
+                buffer += decoder.decode(value, { stream: true });
+                
+                // Process complete SSE messages
+                const messages = buffer.split('\n\n');
+                buffer = messages.pop(); // Keep incomplete message in buffer
+                
+                for (const message of messages) {
+                    const dataMatch = message.match(/^data: (.+)$/m);
+                    if (dataMatch) {
+                        try {
+                            const record = JSON.parse(dataMatch[1]);
+                            if (record.status !== 'complete') {
+                                displayRecord(record);
+                            }
+                        } catch (e) {
+                            console.error('Failed to parse SSE data:', dataMatch[1], e);
+                        }
+                    }
+                }
+            }
+        }
+
+        function displayRecord(record) {
+            recordCount++;
+            
+            // Add to pending queue instead of immediately rendering
+            pendingRecords.push(record);
+            
+            // Update stats (throttled to every 10 records for performance)
+            if (recordCount % 10 === 0) {
+                document.getElementById('count').textContent = recordCount.toLocaleString();
+                document.getElementById('dataSize').textContent = 
+                    (totalBytes / 1024).toFixed(2) + ' KB';
+                updateRate();
+            }
+        }
+
+        function updateDuration() {
+            if (startTime) {
+                const duration = (Date.now() - startTime) / 1000;
+                document.getElementById('duration').textContent = duration.toFixed(1) + 's';
+                updateRate();
+            }
+        }
+
+        function updateRate() {
+            if (startTime && recordCount > 0) {
+                const duration = (Date.now() - startTime) / 1000;
+                const rate = recordCount / duration;
+                document.getElementById('rate').textContent = rate.toFixed(1) + ' records/sec';
+            }
+        }
+
+        function stopStream() {
+            if (controller) {
+                controller.abort();
+            }
+        }
+
+        function clearRecords() {
+            document.getElementById('records').innerHTML = 
+                '<div style="padding: 20px; text-align: center; color: #999;">No records yet. Click "Start Stream" to begin.</div>';
+            recordCount = 0;
+            totalBytes = 0;
+            displayedRecords = [];
+            pendingRecords = [];
+            document.getElementById('count').textContent = '0';
+            document.getElementById('dataSize').textContent = '0 KB';
+            document.getElementById('duration').textContent = '0s';
+            document.getElementById('rate').textContent = '0 records/sec';
+            document.getElementById('error').innerHTML = '';
+        }
+        
+        // Update max display value when changed
+        document.getElementById('maxDisplay').addEventListener('change', function() {
+            document.getElementById('maxDisplayValue').textContent = this.value;
+        });
+    </script>
+</body>
+</html>
+
