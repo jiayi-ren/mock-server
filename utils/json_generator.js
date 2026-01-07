@@ -102,7 +102,7 @@ for (let i = 0; i < 1000; i++) {
 }
 Object.freeze(DECIMAL_RATES);
 
-const MAX_SIZE_KB = 1024 * 1024; // 1 GB
+const MAX_SIZE_KB = 1024 * 1024; // 1 GB (streaming enabled for >100MB)
 
 /**
  * Generate a single record with all field types

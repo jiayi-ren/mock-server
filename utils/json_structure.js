@@ -351,8 +351,74 @@ function getStructureDescription(structure) {
   return DESCRIPTION_MAP[structure] || DESCRIPTION_MAP[1];
 }
 
+/**
+ * Get structure prefix for streaming (opening JSON before records array)
+ * @param {number} structure - Structure type (1-9)
+ * @returns {string|null} Opening JSON string, or null if streaming not supported
+ */
+function getStructurePrefix(structure) {
+  const timestamp = getCachedTimestamp();
+  
+  switch (structure) {
+    case 1:
+      return '[';
+    case 2:
+      return '{"data":[';
+    case 3:
+      return '{"race":{"entries":[';
+    case 4:
+      return '[';
+    case 5:
+      return null; // Columnar format requires all records in memory
+    case 6:
+      return `{"metadata":{"timestamp":"${timestamp}","version":"1.0","record_count":0,"generated_by":"mock-server"},"data":[`;
+    case 7:
+      return '{"data":[';
+    case 8:
+      return null; // Grouped format requires all records in memory
+    case 9:
+      return `{"api":{"version":"v1","endpoint":"/json","timestamp":"${timestamp}","response":{"status":"ok","code":200,"payload":{"records":[`;
+    default:
+      return '[';
+  }
+}
+
+/**
+ * Get structure suffix for streaming (closing JSON after records array)
+ * @param {number} structure - Structure type (1-9)
+ * @param {number} recordCount - Total number of records
+ * @returns {string|null} Closing JSON string, or null if streaming not supported
+ */
+function getStructureSuffix(structure, recordCount) {
+  switch (structure) {
+    case 1:
+      return ']';
+    case 2:
+      return ']}';
+    case 3:
+      return ']}}';
+    case 4:
+      return ']';
+    case 5:
+      return null; // Columnar format requires all records in memory
+    case 6:
+      return ']}';
+    case 7:
+      return `],"links":{"self":"/json","first":"/json?page=1","last":"/json?page=1","prev":null,"next":null},"meta":{"current_page":1,"from":1,"last_page":1,"per_page":${recordCount},"to":${recordCount},"total":${recordCount},"path":"/json"}}`;
+    case 8:
+      return null; // Grouped format requires all records in memory
+    case 9:
+      return `],"metadata":{"count":${recordCount},"format":"json"}}}}}`;
+    default:
+      return ']';
+  }
+}
+
 module.exports = { 
   applyStructure,
   getJSONPath,
-  getStructureDescription
+  getStructureDescription,
+  getStructurePrefix,
+  getStructureSuffix,
+  getCachedTimestamp
 };

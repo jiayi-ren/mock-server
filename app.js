@@ -2,6 +2,7 @@ const express = require("express");
 const cors = require("cors");
 const { generateJSON, MAX_SIZE_KB } = require("./utils/json_generator");
 const { applyStructure, getJSONPath, getStructureDescription } = require("./utils/json_structure");
+const { streamJSON, supportsStreaming } = require("./utils/json_streaming");
 
 const app = express();
 const port = process.env.PORT || 3001;
@@ -67,7 +68,7 @@ app.get("/", (req, res) => {
             <td><code>size</code></td>
             <td>number</td>
             <td>10</td>
-            <td>Target size in KB (1 - ${MAX_SIZE_KB} / 1 GB)</td>
+            <td>Target size in KB (1 - ${MAX_SIZE_KB} / 1 GB, streaming enabled for >100 MB)</td>
           </tr>
           <tr>
             <td><code>random</code></td>
@@ -267,6 +268,7 @@ app.get("/json", (req, res) => {
     const recordFormat = parseInt(req.query['record-format']) || 1;
     const sizeKB = parseFloat(req.query['size']) || 10;
     const useRandom = req.query['random'] === 'true' || req.query['random'] === '1';
+    const STREAMING_THRESHOLD_KB = 102400; // 100 MB
 
     // Validate structure
     if (![1, 2, 3, 4, 5, 6, 7, 8, 9].includes(structure)) {
@@ -290,18 +292,27 @@ app.get("/json", (req, res) => {
       });
     }
 
-    // Generate record data (deterministic by default)
-    const records = generateJSON(recordFormat, sizeKB, useRandom);
-
-    // Apply structure wrapper
-    const data = applyStructure(records, structure);
-
     // Add headers for convenience
     res.set('X-JSONPath', getJSONPath(structure));
     res.set('X-Deterministic', useRandom ? 'false' : 'true');
 
-    // Send response
-    res.json(data);
+    // Use streaming for large payloads (> 100MB) if structure supports it
+    if (sizeKB > STREAMING_THRESHOLD_KB && supportsStreaming(structure)) {
+      res.set('X-Streaming', 'true');
+      streamJSON(res, structure, recordFormat, sizeKB, useRandom);
+    } else {
+      // For small payloads or non-streaming structures, generate all at once
+      res.set('X-Streaming', 'false');
+      
+      // Generate record data (deterministic by default)
+      const records = generateJSON(recordFormat, sizeKB, useRandom);
+
+      // Apply structure wrapper
+      const data = applyStructure(records, structure);
+
+      // Send response
+      res.json(data);
+    }
   } catch (error) {
     res.status(500).json({
       error: 'Failed to generate JSON',

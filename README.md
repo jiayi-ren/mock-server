@@ -8,7 +8,8 @@ A flexible Express-based mock server that generates JSON test data with configur
 - **Dynamic JSON Generation**: Generate JSON payloads on-demand
 - **9 Different JSON Structures**: From flat arrays to deep nested objects, array of arrays, and columnar format
 - **Consistent Field Types**: All records include integers, decimals, booleans, strings with special characters, nested objects, and arrays
-- **Flexible Sizing**: Generate payloads from 1 KB up to 1 GB
+- **Flexible Sizing**: Generate payloads from 1 KB up to 1 GB (streaming enabled for >100 MB)
+- **Memory Efficient Streaming**: Automatically streams large payloads (>100 MB) to support 1GB responses on low-memory hosts (512MB RAM)
 - **CSV-Friendly**: All structures include JSONPath expressions for easy CSV conversion
 
 ## Installation
@@ -29,6 +30,23 @@ The server will run on port 3001 by default (configurable via `PORT` environment
 
 Visit `http://localhost:3001` for interactive documentation.
 
+### Testing
+
+Test the streaming functionality:
+
+```bash
+# In one terminal, start the server
+npm start
+
+# In another terminal, run the test
+npm test
+```
+
+The test verifies that:
+- Small payloads (<100MB) are generated in-memory
+- Large payloads (>100MB) are automatically streamed
+- Streaming works correctly with different structures
+
 ## API Endpoints
 
 ### GET /json
@@ -41,7 +59,7 @@ Generates and returns JSON data based on query parameters.
 |-----------|------|---------|-------------|
 | `structure` | 1-9 | 1 | JSON structure format - how tabular data is represented |
 | `record-format` | 1-3 | 1 | (Kept for compatibility - currently all return same fields) |
-| `size` | number | 10 | Target size in KB (1 - 1048576 KB / 1 GB) |
+| `size` | number | 10 | Target size in KB (1 - 1048576 KB / 1 GB, streaming for >100 MB) |
 | `random` | boolean | false | If true, use random values; if false (default), use deterministic values |
 
 **Important:** By default, responses are **deterministic** - the same query parameters will always return identical data. This is useful for:
@@ -129,14 +147,44 @@ The API includes helpful headers:
 
 - `X-JSONPath`: JSONPath expression to extract records from the response structure
 - `X-Deterministic`: `true` if response is deterministic, `false` if random
+- `X-Streaming`: `true` if response is being streamed, `false` if generated all at once
 
 ```bash
 curl -I http://localhost:3001/json?structure=3
 # X-JSONPath: $.race.entries[*]
 # X-Deterministic: true
+# X-Streaming: false
 
 curl -I http://localhost:3001/json?random=true
 # X-Deterministic: false
+
+curl -I http://localhost:3001/json?size=200000
+# X-Streaming: true (automatically enabled for >100MB)
+```
+
+#### Streaming for Large Payloads
+
+For payloads **larger than 100 MB**, the server automatically uses **streaming** to generate and send data in chunks. This allows:
+
+- **1GB responses on 512MB RAM hosts** - Memory-efficient chunked generation
+- **Faster time-to-first-byte** - Client starts receiving data immediately
+- **Lower memory usage** - Only small chunks held in memory at once
+
+**Streaming Support by Structure:**
+- ✅ **Supported** (1-4, 6-7, 9): Flat arrays, nested objects, array of arrays, metadata wrappers
+- ❌ **Not Supported** (5, 8): Columnar format and grouped data (require all records in memory)
+
+For non-streaming structures, the 100 MB limit still applies.
+
+```bash
+# Streaming example - 500MB flat array (works on 512MB RAM!)
+curl http://localhost:3001/json?size=500000
+
+# Streaming with nested structure - 1GB
+curl http://localhost:3001/json?structure=3&size=1000000
+
+# Non-streaming structure - limited to 100MB
+curl http://localhost:3001/json?structure=5&size=50000
 ```
 
 ### GET /health
