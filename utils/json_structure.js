@@ -414,11 +414,67 @@ function getStructureSuffix(structure, recordCount) {
   }
 }
 
+/**
+ * Add extra top-level fields of various types to a structured result
+ * @param {Object|Array} data - The structured data
+ * @param {boolean} addExtras - Whether to add extra fields
+ * @returns {Object|Array} Data with optional extra fields
+ */
+function addExtraFields(data, addExtras = false) {
+  if (!addExtras) {
+    return data;
+  }
+
+  // For array structures (1, 4), wrap in object to add top-level fields
+  if (Array.isArray(data)) {
+    return {
+      extra_string: "additional text value",
+      extra_number: 42.5,
+      extra_boolean: true,
+      extra_null: null,
+      records: data
+    };
+  }
+
+  // For object structures, add fields at top level
+  return {
+    extra_string: "additional text value",
+    extra_number: 42.5,
+    extra_boolean: true,
+    extra_null: null,
+    ...data
+  };
+}
+
+/**
+ * Get updated JSONPath when extra fields are added
+ * @param {number} structure - Structure type (1-9)
+ * @param {boolean} hasExtras - Whether extra fields were added
+ * @returns {string} JSONPath expression
+ */
+function getJSONPathWithExtras(structure, hasExtras = false) {
+  if (!hasExtras) {
+    return JSONPATH_MAP[structure] || JSONPATH_MAP[1];
+  }
+
+  // When extras are added, array structures get wrapped
+  switch (structure) {
+    case 1:
+      return "$.records[*]";
+    case 4:
+      return "$.records[*]";
+    default:
+      return JSONPATH_MAP[structure] || JSONPATH_MAP[1];
+  }
+}
+
 module.exports = { 
   applyStructure,
   getJSONPath,
   getStructureDescription,
   getStructurePrefix,
   getStructureSuffix,
-  getCachedTimestamp
+  getCachedTimestamp,
+  addExtraFields,
+  getJSONPathWithExtras
 };

@@ -1,7 +1,7 @@
 const express = require("express");
 const cors = require("cors");
 const { generateJSON, MAX_SIZE_KB } = require("./utils/json_generator");
-const { applyStructure, getJSONPath, getStructureDescription } = require("./utils/json_structure");
+const { applyStructure, getJSONPath, getStructureDescription, addExtraFields, getJSONPathWithExtras } = require("./utils/json_structure");
 const { streamJSON, supportsStreaming } = require("./utils/json_streaming");
 const { streamNDJSON, streamSSE } = require("./utils/json_streaming_ndjson");
 
@@ -136,6 +136,12 @@ app.get("/", (req, res) => {
             <td>boolean</td>
             <td>false</td>
             <td>If true, use random values; if false (default), use deterministic values</td>
+          </tr>
+          <tr>
+            <td><code>extra-fields</code></td>
+            <td>boolean</td>
+            <td>false</td>
+            <td>If true, add extra top-level fields (string, number, boolean, null) to the response</td>
           </tr>
         </table>
         <p><strong>Note:</strong> By default, responses are <em>deterministic</em> - the same query parameters will always return identical data. This is useful for testing, caching, and reproducibility. Set <code>random=true</code> to get different data on each request.</p>
@@ -310,6 +316,10 @@ app.get("/", (req, res) => {
           <strong>Grouped by category:</strong><br>
           <a href="/json?structure=8&size=50">/json?structure=8&size=50</a>
         </div>
+        <div class="example">
+          <strong>With extra top-level fields (string, number, boolean, null):</strong><br>
+          <a href="/json?structure=2&size=10&extra-fields=true">/json?structure=2&size=10&extra-fields=true</a>
+        </div>
 
         <h3>Progressive Streaming Endpoints</h3>
         <p>For <strong>true progressive streaming</strong> visible in the browser (data appears as it's generated):</p>
@@ -342,6 +352,7 @@ app.get("/json", (req, res) => {
     const recordFormat = parseInt(req.query['record-format']) || 1;
     const sizeKB = parseFloat(req.query['size']) || 10;
     const useRandom = req.query['random'] === 'true' || req.query['random'] === '1';
+    const extraFields = req.query['extra-fields'] === 'true' || req.query['extra-fields'] === '1';
     const STREAMING_THRESHOLD_KB = 102400; // 100 MB
     
     // Memory check disabled - hosting platform manages memory dynamically
@@ -370,11 +381,13 @@ app.get("/json", (req, res) => {
     }
 
     // Add headers for convenience
-    res.set('X-JSONPath', getJSONPath(structure));
+    res.set('X-JSONPath', getJSONPathWithExtras(structure, extraFields));
     res.set('X-Deterministic', useRandom ? 'false' : 'true');
+    res.set('X-Extra-Fields', extraFields ? 'true' : 'false');
 
     // Use streaming for large payloads (> 100MB) if structure supports it
-    if (sizeKB > STREAMING_THRESHOLD_KB && supportsStreaming(structure)) {
+    // Note: extra-fields is not supported with streaming
+    if (sizeKB > STREAMING_THRESHOLD_KB && supportsStreaming(structure) && !extraFields) {
       res.set('X-Streaming', 'true');
       streamJSON(res, structure, recordFormat, sizeKB, useRandom);
     } else {
@@ -385,7 +398,10 @@ app.get("/json", (req, res) => {
       const records = generateJSON(recordFormat, sizeKB, useRandom);
 
       // Apply structure wrapper
-      const data = applyStructure(records, structure);
+      let data = applyStructure(records, structure);
+      
+      // Add extra fields if requested
+      data = addExtraFields(data, extraFields);
 
       // Send response
       res.json(data);
